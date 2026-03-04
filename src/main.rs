@@ -27,6 +27,13 @@ enum PieceColor{
 struct SelectedPiece(Option<Entity>);
 
 #[derive(Resource)]
+struct Animation{
+    target: Option<Entity>,
+    final_location: Option<Vec3>,
+    is_finished: bool,
+}
+
+#[derive(Resource)]
 struct ChessMaterials{
     white: Handle<StandardMaterial>,
     black: Handle<StandardMaterial>,
@@ -37,8 +44,9 @@ struct MainPlugin;
 impl Plugin for MainPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(SelectedPiece(None));
+        app.insert_resource(Animation{target: None, final_location: None, is_finished: true});
         app.add_systems(Startup, (setup_materials, init_scene, create_chess_pieces).chain());
-        app.add_systems(Update, (input_update, update_textures));
+        app.add_systems(Update, (input_update, update_textures, update_animation));
     }
 }
 
@@ -244,12 +252,18 @@ fn input_update(
 }
 
 fn handle_click(
+
     trigger: On<Pointer<Press>>, 
     mut transform_query: Query<&mut Transform>,
     chess_piece_query: Query<&ChessPieces>,
     mut selected_piece: ResMut<SelectedPiece>,
+    mut animation: ResMut<Animation>,
     mut commands: Commands,
 ) {
+    if !animation.is_finished {
+        return;
+    }
+
 
     let hovered_entity = trigger.event_target();
 
@@ -260,9 +274,13 @@ fn handle_click(
         }
 
         if let Ok([hover_transform, mut selected_transform]) = transform_query.get_many_mut([hovered_entity, selected_piece_enity]){
-            selected_transform.translation.x = hover_transform.translation.x;
-            selected_transform.translation.z = hover_transform.translation.z;
-            selected_transform.translation.y = 0.55;
+            let mut final_vec = hover_transform.translation;
+            final_vec.y = 0.55;
+
+            animation.target = Some(selected_piece_enity);
+            animation.final_location = Some(final_vec);
+            animation.is_finished = false;
+
 
             selected_piece.0 = None;
         }
@@ -270,9 +288,50 @@ fn handle_click(
     } else {
         if let Ok(ChessPieces) = chess_piece_query.get(hovered_entity) {
             selected_piece.0 = Some(hovered_entity);
+            
             if let Ok(mut hover_transform) = transform_query.get_mut(hovered_entity) {
-                hover_transform.translation.y = 2.0;
+                
+                let mut final_vec = hover_transform.translation;
+                final_vec.y = 2.0;
+
+                animation.target = Some(hovered_entity);
+                animation.final_location = Some(final_vec);
+                animation.is_finished = false;
+                // hover_transform.translation.y = 2.0;
             }
         }
+    }
+}
+
+fn update_animation(
+    mut animation: ResMut<Animation>,
+    mut transform_query: Query<&mut Transform>,
+    time: Res<Time>,
+){
+
+    let speed = 5.0;
+
+    if let (Some(target), Some(final_location)) = (animation.target, animation.final_location){
+        if let Ok(mut target_transform) = transform_query.get_mut(target) {
+            target_transform.translation.y += 1.0 * time.delta_secs();
+            let direction = target_transform.translation - final_location;
+            let distance = direction.length();
+
+            if distance > 0.1 {
+                let step = speed * time.delta_secs();
+                
+                let move_amount = direction.normalize() * (step + (distance/10.0));
+                target_transform.translation -= move_amount;
+            } else {
+                target_transform.translation = final_location;
+                animation.target = None;
+                animation.final_location = None;
+                animation.is_finished = true;
+            }
+
+        }
+        // 
+
+
     }
 }
